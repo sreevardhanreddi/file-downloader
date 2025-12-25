@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Downloader</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23a8a29e'><path stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4'/></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        stone: {
+                            850: '#1c1917',
+                            950: '#0c0a09'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .htmx-indicator {
+            opacity: 0;
+            transition: opacity 200ms ease-in;
+        }
+        .htmx-request .htmx-indicator,
+        .htmx-request.htmx-indicator {
+            opacity: 1;
+        }
+        .htmx-request .htmx-hide-on-request {
+            display: none;
+        }
+    </style>
+</head>
+<body class="bg-stone-950 text-stone-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-4xl">
+        <header class="mb-8">
+            <h1 class="text-3xl font-bold text-stone-100 mb-2">File Downloader</h1>
+            <p class="text-stone-400">Paste a URL to download files</p>
+        </header>
+
+        <form hx-post="/download"
+              hx-target="#download-list"
+              hx-swap="innerHTML"
+              hx-indicator="#submit-indicator"
+              class="mb-8">
+            <div class="flex gap-3">
+                <input type="url"
+                       name="url"
+                       placeholder="https://example.com/file.pdf"
+                       required
+                       class="flex-1 px-4 py-3 bg-stone-900 border border-stone-700 rounded-lg
+                              text-stone-100 placeholder-stone-500
+                              focus:outline-none focus:ring-2 focus:ring-stone-600 focus:border-transparent">
+                <button type="submit"
+                        class="px-6 py-3 bg-stone-700 hover:bg-stone-600 text-stone-100
+                               rounded-lg font-medium transition-colors
+                               focus:outline-none focus:ring-2 focus:ring-stone-500">
+                    <span class="flex items-center gap-2">
+                        <span id="submit-indicator" class="htmx-indicator">
+                            <svg class="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                            </svg>
+                        </span>
+                        <svg class="w-5 h-5 htmx-hide-on-request" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                        </svg>
+                        Download
+                    </span>
+                </button>
+            </div>
+        </form>
+
+        <div id="download-list"
+             hx-get="/downloads"
+             hx-trigger="every 2s"
+             hx-swap="innerHTML">
+            {% include 'partials/download_list.html' %}
+        </div>
+    </div>
+    <script>
+        // Flag to pause polling during interactions
+        window.pausePolling = false;
+
+        // Cancel polling requests when editing/interacting
+        document.body.addEventListener('htmx:beforeRequest', function(e) {
+            // Only cancel polling requests, not form submissions
+            if (e.detail.elt.id === 'download-list' && window.pausePolling) {
+                e.preventDefault();
+            }
+        });
+
+        // Close dropdowns when clicking outside
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.relative')) {
+                document.querySelectorAll('.relative > div.absolute').forEach(function(dropdown) {
+                    if (!dropdown.classList.contains('hidden')) {
+                        dropdown.classList.add('hidden');
+                        window.pausePolling = false;
+                    }
+                });
+            }
+        });
+
+        // Helper functions for rename form
+        function openRenameForm(id) {
+            window.pausePolling = true;
+            document.getElementById('filename-display-' + id).classList.add('hidden');
+            document.getElementById('filename-edit-' + id).classList.remove('hidden');
+            document.getElementById('filename-edit-' + id).querySelector('input').focus();
+        }
+
+        function closeRenameForm(id) {
+            window.pausePolling = false;
+            document.getElementById('filename-display-' + id).classList.remove('hidden');
+            document.getElementById('filename-edit-' + id).classList.add('hidden');
+        }
+
+        function openDeleteDropdown(btn) {
+            window.pausePolling = true;
+            btn.nextElementSibling.classList.toggle('hidden');
+        }
+
+        // Resume polling after any htmx swap completes (form submitted)
+        document.body.addEventListener('htmx:afterSwap', function(e) {
+            if (e.detail.target.id === 'download-list') {
+                window.pausePolling = false;
+            }
+        });
+    </script>
+</body>
+</html>
