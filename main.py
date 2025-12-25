@@ -1,6 +1,9 @@
+import asyncio
 import logging
 import re
+import time
 from pathlib import Path
+from typing import Dict
 from urllib.parse import unquote, urlparse
 
 import httpx
@@ -32,6 +35,9 @@ app = FastAPI(title="File Downloader")
 DOWNLOADS_DIR = Path(__file__).parent / "downloads"
 DOWNLOADS_DIR.mkdir(exist_ok=True)
 
+# Track active download tasks for pause/cancel
+active_downloads: Dict[int, asyncio.Event] = {}  # download_id -> cancel_event
+
 templates = Jinja2Templates(directory="templates")
 
 
@@ -46,7 +52,24 @@ def humanize_bytes(size: int) -> str:
     return f"{size:.2f} PB"
 
 
+def format_eta(seconds: int) -> str:
+    """Convert seconds to human readable ETA."""
+    if seconds is None or seconds <= 0:
+        return ""
+    if seconds < 60:
+        return f"{seconds}s"
+    elif seconds < 3600:
+        minutes = seconds // 60
+        secs = seconds % 60
+        return f"{minutes}m {secs}s"
+    else:
+        hours = seconds // 3600
+        minutes = (seconds % 3600) // 60
+        return f"{hours}h {minutes}m"
+
+
 templates.env.filters["humanize_bytes"] = humanize_bytes
+templates.env.filters["format_eta"] = format_eta
 
 
 @app.on_event("startup")
@@ -69,31 +92,58 @@ def extract_filename(url: str, headers: dict) -> str:
     return "download"
 
 
-async def download_file(download_id: int, url: str):
+async def download_file(download_id: int, url: str, resume_from: int = 0):
     """Background task to download a file."""
-    logger.info(f"[#{download_id}] Starting download: {url}")
+    action = "Resuming" if resume_from > 0 else "Starting"
+    logger.info(f"[#{download_id}] {action} download: {url}")
+
+    # Create cancel event for this download
+    cancel_event = asyncio.Event()
+    active_downloads[download_id] = cancel_event
 
     try:
         await update_download(download_id, status=DownloadStatus.DOWNLOADING.value)
 
+        # Get existing download info for resume
+        download_info = await get_download(download_id)
+        existing_filename = download_info.get("filename") if download_info else None
+
+        headers = {}
+        if resume_from > 0:
+            headers["Range"] = f"bytes={resume_from}-"
+
         async with httpx.AsyncClient(follow_redirects=True, timeout=None) as client:
-            async with client.stream("GET", url) as response:
+            async with client.stream("GET", url, headers=headers) as response:
                 response.raise_for_status()
                 logger.info(
                     f"[#{download_id}] Connected - Status: {response.status_code}"
                 )
 
-                filename = extract_filename(url, dict(response.headers))
-                file_size = int(response.headers.get("content-length", 0))
+                # For resumed downloads, use existing filename
+                if existing_filename:
+                    filename = existing_filename
+                    filepath = DOWNLOADS_DIR / filename
+                else:
+                    filename = extract_filename(url, dict(response.headers))
+                    filepath = DOWNLOADS_DIR / filename
+                    counter = 1
+                    while filepath.exists():
+                        stem = Path(filename).stem
+                        suffix = Path(filename).suffix
+                        filepath = DOWNLOADS_DIR / f"{stem}_{counter}{suffix}"
+                        counter += 1
 
-                # Ensure unique filename
-                filepath = DOWNLOADS_DIR / filename
-                counter = 1
-                while filepath.exists():
-                    stem = Path(filename).stem
-                    suffix = Path(filename).suffix
-                    filepath = DOWNLOADS_DIR / f"{stem}_{counter}{suffix}"
-                    counter += 1
+                # Get file size (for Range requests, need to parse Content-Range)
+                if response.status_code == 206:  # Partial content
+                    content_range = response.headers.get("content-range", "")
+                    if "/" in content_range:
+                        file_size = int(content_range.split("/")[-1])
+                    else:
+                        file_size = (
+                            download_info.get("file_size", 0) if download_info else 0
+                        )
+                else:
+                    file_size = int(response.headers.get("content-length", 0))
 
                 await update_download(
                     download_id, filename=filepath.name, file_size=file_size
@@ -102,31 +152,87 @@ async def download_file(download_id: int, url: str):
                 size_str = humanize_bytes(file_size) if file_size else "Unknown size"
                 logger.info(f"[#{download_id}] Saving as: {filepath.name} ({size_str})")
 
-                downloaded = 0
+                downloaded = resume_from
                 last_progress = 0
-                last_log_progress = 0
+                last_log_progress = (
+                    (resume_from * 100 // file_size) if file_size > 0 else 0
+                )
+                start_time = time.time()
+                last_update_time = start_time
 
-                with open(filepath, "wb") as f:
+                # Open in append mode if resuming, write mode otherwise
+                mode = "ab" if resume_from > 0 else "wb"
+                with open(filepath, mode) as f:
                     async for chunk in response.aiter_bytes(chunk_size=8192):
+                        # Check for cancellation/pause
+                        if cancel_event.is_set():
+                            # Save progress before stopping
+                            await update_download(
+                                download_id,
+                                downloaded_bytes=downloaded,
+                                speed=0,
+                                eta=0,
+                            )
+                            logger.info(
+                                f"[#{download_id}] Download stopped at {downloaded} bytes"
+                            )
+                            return
+
                         f.write(chunk)
                         downloaded += len(chunk)
 
                         if file_size > 0:
                             progress = int((downloaded / file_size) * 100)
-                            if progress != last_progress and progress % 5 == 0:
-                                await update_download(download_id, progress=progress)
+                            current_time = time.time()
+
+                            # Update every 5% or every second
+                            if (progress != last_progress and progress % 5 == 0) or (
+                                current_time - last_update_time >= 1
+                            ):
+                                elapsed = current_time - start_time
+                                speed = (
+                                    int((downloaded - resume_from) / elapsed)
+                                    if elapsed > 0
+                                    else 0
+                                )
+                                remaining = file_size - downloaded
+                                eta = int(remaining / speed) if speed > 0 else 0
+
+                                await update_download(
+                                    download_id,
+                                    progress=progress,
+                                    downloaded_bytes=downloaded,
+                                    speed=speed,
+                                    eta=eta,
+                                )
                                 last_progress = progress
+                                last_update_time = current_time
 
                             # Log every 10%
                             if progress >= last_log_progress + 10:
+                                elapsed = current_time - start_time
+                                speed = (
+                                    int((downloaded - resume_from) / elapsed)
+                                    if elapsed > 0
+                                    else 0
+                                )
+                                eta = (
+                                    int((file_size - downloaded) / speed)
+                                    if speed > 0
+                                    else 0
+                                )
                                 logger.info(
                                     f"[#{download_id}] Progress: {progress}% "
-                                    f"({humanize_bytes(downloaded)} / {humanize_bytes(file_size)})"
+                                    f"({humanize_bytes(downloaded)} / {humanize_bytes(file_size)}) "
+                                    f"- {humanize_bytes(speed)}/s - ETA: {format_eta(eta)}"
                                 )
                                 last_log_progress = progress
 
                 await update_download(
-                    download_id, status=DownloadStatus.COMPLETED.value, progress=100
+                    download_id,
+                    status=DownloadStatus.COMPLETED.value,
+                    progress=100,
+                    downloaded_bytes=downloaded,
                 )
                 logger.info(
                     f"[#{download_id}] Completed: {filepath.name} ({humanize_bytes(file_size)})"
@@ -137,6 +243,10 @@ async def download_file(download_id: int, url: str):
         await update_download(
             download_id, status=DownloadStatus.FAILED.value, error=str(e)
         )
+    finally:
+        # Clean up
+        if download_id in active_downloads:
+            del active_downloads[download_id]
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -162,6 +272,105 @@ async def start_download(
 
 @app.get("/downloads", response_class=HTMLResponse)
 async def list_downloads(request: Request):
+    downloads = await get_downloads()
+    return templates.TemplateResponse(
+        "partials/download_list.html", {"request": request, "downloads": downloads}
+    )
+
+
+@app.post("/download/{download_id}/pause", response_class=HTMLResponse)
+async def pause_download(request: Request, download_id: int):
+    """Pause an active download."""
+    if download_id in active_downloads:
+        active_downloads[download_id].set()  # Signal to stop
+        await update_download(download_id, status=DownloadStatus.PAUSED.value)
+        logger.info(f"[#{download_id}] Paused")
+
+    downloads = await get_downloads()
+    return templates.TemplateResponse(
+        "partials/download_list.html", {"request": request, "downloads": downloads}
+    )
+
+
+@app.post("/download/{download_id}/resume", response_class=HTMLResponse)
+async def resume_download(
+    request: Request, download_id: int, background_tasks: BackgroundTasks
+):
+    """Resume a paused download."""
+    download = await get_download(download_id)
+    if download and download.get("status") == DownloadStatus.PAUSED.value:
+        resume_from = download.get("downloaded_bytes", 0) or 0
+        background_tasks.add_task(
+            download_file, download_id, download["url"], resume_from
+        )
+        logger.info(f"[#{download_id}] Resuming from {humanize_bytes(resume_from)}")
+
+    downloads = await get_downloads()
+    return templates.TemplateResponse(
+        "partials/download_list.html", {"request": request, "downloads": downloads}
+    )
+
+
+@app.post("/download/{download_id}/cancel", response_class=HTMLResponse)
+async def cancel_download(request: Request, download_id: int):
+    """Cancel a download and remove partial file."""
+    download = await get_download(download_id)
+
+    # Stop active download if running
+    if download_id in active_downloads:
+        active_downloads[download_id].set()
+        # Give it a moment to stop
+        await asyncio.sleep(0.1)
+
+    # Remove partial file
+    if download and download.get("filename"):
+        filepath = DOWNLOADS_DIR / download["filename"]
+        if filepath.exists():
+            filepath.unlink()
+
+    await update_download(
+        download_id,
+        status=DownloadStatus.CANCELLED.value,
+        downloaded_bytes=0,
+        progress=0,
+        speed=0,
+        eta=0,
+    )
+    logger.info(f"[#{download_id}] Cancelled")
+
+    downloads = await get_downloads()
+    return templates.TemplateResponse(
+        "partials/download_list.html", {"request": request, "downloads": downloads}
+    )
+
+
+@app.post("/download/{download_id}/retry", response_class=HTMLResponse)
+async def retry_download(
+    request: Request, download_id: int, background_tasks: BackgroundTasks
+):
+    """Retry a failed or cancelled download from the beginning."""
+    download = await get_download(download_id)
+    if download and download.get("status") in [
+        DownloadStatus.FAILED.value,
+        DownloadStatus.CANCELLED.value,
+    ]:
+        # Remove old partial file if exists
+        if download.get("filename"):
+            filepath = DOWNLOADS_DIR / download["filename"]
+            if filepath.exists():
+                filepath.unlink()
+
+        # Reset and restart
+        await update_download(
+            download_id,
+            status=DownloadStatus.PENDING.value,
+            progress=0,
+            downloaded_bytes=0,
+            error=None,
+        )
+        background_tasks.add_task(download_file, download_id, download["url"], 0)
+        logger.info(f"[#{download_id}] Retrying download")
+
     downloads = await get_downloads()
     return templates.TemplateResponse(
         "partials/download_list.html", {"request": request, "downloads": downloads}

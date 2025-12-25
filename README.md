@@ -5,7 +5,10 @@ A simple web-based file downloader built with FastAPI, HTMX, and Tailwind CSS.
 ## Features
 
 - Paste any URL to download files (PDFs, videos, etc.)
-- Real-time download progress tracking
+- Real-time download progress with speed and ETA
+- **Pause/Resume** downloads with HTTP Range support
+- **Cancel** downloads and clean up partial files
+- **Retry** failed or cancelled downloads
 - Background downloads with async processing
 - SQLite database for persistent download history
 - Rename downloaded files
@@ -53,6 +56,10 @@ Visit `http://localhost:8000` in your browser.
 | GET | `/` | Main page |
 | POST | `/download` | Start a new download |
 | GET | `/downloads` | Get download list (HTMX polling) |
+| POST | `/download/{id}/pause` | Pause an active download |
+| POST | `/download/{id}/resume` | Resume a paused download |
+| POST | `/download/{id}/cancel` | Cancel and remove partial file |
+| POST | `/download/{id}/retry` | Retry failed/cancelled download |
 | PUT | `/download/{id}/rename` | Rename a file |
 | DELETE | `/download/{id}` | Delete from DB and filesystem |
 | DELETE | `/download/{id}/db-only` | Delete from DB only |
