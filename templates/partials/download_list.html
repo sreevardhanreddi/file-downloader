@@ -96,6 +96,18 @@
                     Retry
                 </button>
                 {% elif download.status == 'completed' %}
+                {% if download.filename|is_viewable %}
+                <a href="/view/{{ download.id }}"
+                   target="_blank"
+                   class="px-3 py-1.5 bg-blue-800 hover:bg-blue-700 text-blue-100
+                          rounded text-sm transition-colors flex items-center gap-1.5">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                    </svg>
+                    View
+                </a>
+                {% endif %}
                 <a href="/file/{{ download.id }}"
                    class="px-3 py-1.5 bg-stone-700 hover:bg-stone-600 text-stone-100
                           rounded text-sm transition-colors flex items-center gap-1.5">

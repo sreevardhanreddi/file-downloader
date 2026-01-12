@@ -68,8 +68,48 @@ def format_eta(seconds: int) -> str:
         return f"{hours}h {minutes}m"
 
 
+# File extensions that can be opened/viewed in the browser
+VIEWABLE_EXTENSIONS = {
+    # Images
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".gif",
+    ".svg",
+    ".webp",
+    ".ico",
+    ".bmp",
+    # Videos
+    ".mp4",
+    ".webm",
+    ".ogv",
+    # Audio
+    ".mp3",
+    ".wav",
+    ".ogg",
+    # Documents
+    ".pdf",
+    ".txt",
+    ".html",
+    ".htm",
+    ".css",
+    ".js",
+    ".json",
+    ".xml",
+}
+
+
+def is_viewable(filename: str) -> bool:
+    """Check if a file type can be viewed in the browser."""
+    if not filename:
+        return False
+    ext = Path(filename).suffix.lower()
+    return ext in VIEWABLE_EXTENSIONS
+
+
 templates.env.filters["humanize_bytes"] = humanize_bytes
 templates.env.filters["format_eta"] = format_eta
+templates.env.filters["is_viewable"] = is_viewable
 
 
 @app.on_event("startup")
@@ -458,6 +498,21 @@ async def serve_file(download_id: int):
         return HTMLResponse("File not found", status_code=404)
 
     return FileResponse(filepath, filename=download["filename"])
+
+
+@app.get("/view/{download_id}")
+async def view_file(download_id: int):
+    """Serve file inline for viewing in browser."""
+    download = await get_download(download_id)
+    if not download or not download.get("filename"):
+        return HTMLResponse("File not found", status_code=404)
+
+    filepath = DOWNLOADS_DIR / download["filename"]
+    if not filepath.exists():
+        return HTMLResponse("File not found", status_code=404)
+
+    # Serve inline (without Content-Disposition: attachment)
+    return FileResponse(filepath)
 
 
 if __name__ == "__main__":
