@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile.dev
     ports:
-      - "8000:8000"
+      - "8013:8000"
     volumes:
       - .:/app                              # Mount source code for hot-reload
       - ./downloads:/app/downloads          # Mount the downloads directory

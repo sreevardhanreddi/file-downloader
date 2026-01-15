@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile.prod
     restart: always
     ports:
-      - "8000:8000"
+      - "8013:8000"
     volumes:
       - ./downloads:/app/downloads          # Mount the downloads directory
       - ./downloads.db:/app/downloads.db    # Persist the database file
