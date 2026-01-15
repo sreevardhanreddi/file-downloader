@@ -60,6 +60,7 @@ func main() {
 		"humanize_bytes": humanizeBytes,
 		"format_eta":     formatETA,
 		"is_viewable":    isViewable,
+		"truncate":       truncateString,
 	}
 
 	var err error
@@ -128,6 +129,13 @@ func isViewable(filename string) bool {
 	}
 	ext := strings.ToLower(filepath.Ext(filename))
 	return viewableExtensions[ext]
+}
+
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 func extractFilename(urlStr string, headers http.Header) string {
