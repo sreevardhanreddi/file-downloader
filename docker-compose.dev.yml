@@ -4,14 +4,21 @@ services:
       context: .
       dockerfile: Dockerfile.dev
     ports:
-      - "8013:8000"
+      - "8000:8000"
     volumes:
-      - .:/app
-      - ./downloads:/app/downloads # Mount the downloads directory
-    env_file:
-      - .env
+      - .:/app                              # Mount source code for hot-reload
+      - ./downloads:/app/downloads          # Mount the downloads directory
+      - go-mod-cache:/go/pkg/mod           # Cache Go modules
+    environment:
+      - PORT=8000
+      - CGO_ENABLED=1
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
+    stdin_open: true
+    tty: true
+
+volumes:
+  go-mod-cache:

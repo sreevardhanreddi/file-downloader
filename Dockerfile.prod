@@ -1,16 +1,42 @@
-FROM python:3.13-slim
+# Multi-stage build for optimized Go binary
+FROM golang:1.23-alpine AS builder
+
+# Install build dependencies for CGO (needed for SQLite)
+RUN apk add --no-cache gcc musl-dev sqlite-dev
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+# Copy go mod files
+COPY go.mod go.sum ./
 
-COPY requirements.txt .
+# Download dependencies
+RUN go mod download
 
-RUN pip install -r requirements.txt
-
+# Copy source code
 COPY . .
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Build optimized binary
+RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o wgetter main.go
+
+# Final stage - minimal runtime image
+FROM alpine:latest
+
+# Install runtime dependencies
+RUN apk add --no-cache ca-certificates sqlite-libs
+
+WORKDIR /app
+
+# Copy binary from builder
+COPY --from=builder /app/wgetter .
+
+# Copy templates
+COPY --from=builder /app/templates ./templates
+
+# Create downloads directory
+RUN mkdir -p /app/downloads
+
+# Expose port
+EXPOSE 8000
+
+# Run the binary
+CMD ["./wgetter"]

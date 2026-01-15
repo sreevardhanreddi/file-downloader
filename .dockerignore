@@ -1,0 +1,64 @@
+# Git
+.git
+.gitignore
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+wgetter-go
+wgetter
+wgetter-*
+tmp/
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation (not needed in container)
+*.md
+!README.md
+
+# Database and downloads (mounted as volumes)
+downloads.db
+downloads.db-journal
+downloads.db-wal
+downloads.db-shm
+downloads/*
+
+# Python artifacts (legacy - to be removed)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Docker
+docker-compose*.yml
+Dockerfile*
+.dockerignore
+
+# Build logs
+build-errors.log

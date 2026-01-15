@@ -5,13 +5,20 @@ services:
       dockerfile: Dockerfile.prod
     restart: always
     ports:
-      - "8013:8000"
+      - "8000:8000"
     volumes:
-      - ./downloads:/app/downloads # Mount the downloads directory
-    env_file:
-      - .env
+      - ./downloads:/app/downloads          # Mount the downloads directory
+      - ./downloads.db:/app/downloads.db    # Persist the database file
+    environment:
+      - PORT=8000
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8000/downloads"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s

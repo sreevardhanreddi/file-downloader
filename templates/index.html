@@ -80,7 +80,7 @@
              hx-get="/downloads"
              hx-trigger="every 2s"
              hx-swap="innerHTML">
-            {% include 'partials/download_list.html' %}
+            {{template "download_list.html" .}}
         </div>
     </div>
     <script>
