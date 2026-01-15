@@ -22,7 +22,8 @@ import (
 
 const (
 	downloadsDir = "downloads"
-	dbPath       = "downloads.db"
+	dataDir      = "data"
+	dbPath       = "data/downloads.db"
 	port         = 8000
 )
 
@@ -38,6 +39,11 @@ type DownloadTask struct {
 }
 
 func main() {
+	// Create data directory for database
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		log.Fatalf("Failed to create data directory: %v", err)
+	}
+
 	// Initialize database
 	if err := database.InitDB(dbPath); err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)

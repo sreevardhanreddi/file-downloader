@@ -8,7 +8,7 @@ services:
       - "8013:8000"
     volumes:
       - ./downloads:/app/downloads          # Mount the downloads directory
-      - ./downloads.db:/app/downloads.db    # Persist the database file
+      - ./data:/app/data                    # Persist the database file (stored as /app/data/downloads.db)
     environment:
       - PORT=8000
     logging:
