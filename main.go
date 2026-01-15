@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -15,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"wgetter/database"
@@ -138,6 +141,23 @@ func truncateString(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
+func isBrokenPipeError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Check for broken pipe or connection reset errors
+	var netErr *net.OpError
+	if errors.As(err, &netErr) {
+		if netErr.Err == syscall.EPIPE || netErr.Err == syscall.ECONNRESET {
+			return true
+		}
+	}
+	// Also check error message as fallback
+	errMsg := err.Error()
+	return strings.Contains(errMsg, "broken pipe") ||
+		strings.Contains(errMsg, "connection reset")
+}
+
 func extractFilename(urlStr string, headers http.Header) string {
 	// Try Content-Disposition header first
 	contentDisp := headers.Get("Content-Disposition")
@@ -198,8 +218,10 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := templates.ExecuteTemplate(w, "index.html", data); err != nil {
-		log.Printf("Template error: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		if !isBrokenPipeError(err) {
+			log.Printf("Template error: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
 	}
 }
 
@@ -239,7 +261,9 @@ func startDownloadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := templates.ExecuteTemplate(w, "download_list.html", data); err != nil {
-		log.Printf("Template error: %v", err)
+		if !isBrokenPipeError(err) {
+			log.Printf("Template error: %v", err)
+		}
 	}
 }
 
@@ -255,7 +279,9 @@ func listDownloadsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := templates.ExecuteTemplate(w, "download_list.html", data); err != nil {
-		log.Printf("Template error: %v", err)
+		if !isBrokenPipeError(err) {
+			log.Printf("Template error: %v", err)
+		}
 	}
 }
 
@@ -614,7 +640,9 @@ func renderDownloadList(w http.ResponseWriter) {
 	}
 
 	if err := templates.ExecuteTemplate(w, "download_list.html", data); err != nil {
-		log.Printf("Template error: %v", err)
+		if !isBrokenPipeError(err) {
+			log.Printf("Template error: %v", err)
+		}
 	}
 }
 

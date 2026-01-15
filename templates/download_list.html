@@ -245,7 +245,7 @@
                 Failed
             </span>
             {{if .Error}}
-            <span class="text-red-400 text-sm truncate">{{slice .Error 0 50}}</span>
+            <span class="text-red-400 text-sm truncate">{{truncate .Error 50}}</span>
             {{end}}
             {{end}}
         </div>
